@@ -1,7 +1,8 @@
-import { TransferTransaction, AccountId, TokenId } from '@hashgraph/sdk';
+import { TransferTransaction, AccountId, TokenId, TokenAssociateTransaction } from '@hashgraph/sdk';
 import { getDAppConnector } from './walletConnect';
 
 const OLD_TOKEN_ID = import.meta.env.VITE_OLD_TOKEN_ID;
+const NEW_TOKEN_ID = import.meta.env.VITE_NEW_TOKEN_ID;
 const BLACKHOLE_ACCOUNT_ID = import.meta.env.VITE_BLACKHOLE_ACCOUNT_ID;
 
 export interface SwapResult {
@@ -12,7 +13,55 @@ export interface SwapResult {
 }
 
 /**
+ * Check if an account is associated with a token by querying the mirror node
+ */
+async function isTokenAssociated(accountId: string, tokenId: string): Promise<boolean> {
+  try {
+    const response = await fetch(
+      `https://mainnet-public.mirrornode.hedera.com/api/v1/accounts/${accountId}/tokens?token.id=${tokenId}`
+    );
+
+    if (!response.ok) {
+      console.error('Failed to check token association:', response.status);
+      return false;
+    }
+
+    const data = await response.json();
+    return data.tokens && data.tokens.length > 0;
+  } catch (error) {
+    console.error('Error checking token association:', error);
+    return false;
+  }
+}
+
+/**
+ * Associate an account with a token
+ * User pays the association fee (~$0.05)
+ */
+async function associateToken(
+  userAccountId: string,
+  tokenId: string,
+  signer: any
+): Promise<void> {
+  console.log(`Associating account ${userAccountId} with token ${tokenId}...`);
+
+  const associateTx = await new TokenAssociateTransaction()
+    .setAccountId(AccountId.fromString(userAccountId))
+    .setTokenIds([TokenId.fromString(tokenId)]);
+
+  const txResponse = await associateTx.executeWithSigner(signer);
+  const receipt = await txResponse.getReceiptWithSigner(signer);
+
+  if (receipt.status.toString() !== 'SUCCESS') {
+    throw new Error(`Token association failed with status: ${receipt.status.toString()}`);
+  }
+
+  console.log('Token association successful!');
+}
+
+/**
  * Swap a single NFT
+ * Step 0: Check if user is associated with new token, if not, associate
  * Step 1: User signs and executes transaction to send old NFT to blackhole
  * Step 2: Backend verifies receipt and sends new NFT to user
  */
@@ -32,6 +81,31 @@ export const swapSingleNFT = async (
     const signer = dAppConnector.getSigner(AccountId.fromString(userAccountId));
     if (!signer) {
       throw new Error('No signer available');
+    }
+
+    // Step 0: Check if user is associated with the new token
+    console.log('Checking token association for new token...');
+    const isAssociated = await isTokenAssociated(userAccountId, NEW_TOKEN_ID);
+
+    if (!isAssociated) {
+      console.log('User not associated with new token. Requesting association...');
+
+      // Ask user to confirm association
+      const confirmAssociation = confirm(
+        `⚠️ Token Association Required\n\n` +
+        `Before you can receive the new Degen Ape NFT, you need to associate your account with the new token.\n\n` +
+        `This is a one-time fee of approximately $0.05 (paid in HBAR).\n\n` +
+        `Continue with token association?`
+      );
+
+      if (!confirmAssociation) {
+        throw new Error('Token association cancelled by user');
+      }
+
+      // Associate the token
+      await associateToken(userAccountId, NEW_TOKEN_ID, signer);
+    } else {
+      console.log('User already associated with new token ✓');
     }
 
     console.log('Creating transfer transaction...');
