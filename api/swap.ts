@@ -1,15 +1,15 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { 
-  Client, 
-  AccountId, 
-  PrivateKey, 
+import {
+  Client,
+  AccountId,
+  PrivateKey,
   TransferTransaction,
   TokenId,
   Transaction,
   TransactionId,
   TransactionReceiptQuery,
   Status
-} from '@hiero-ledger/sdk';
+} from '@hashgraph/sdk';
 
 const TREASURY_ACCOUNT_ID = process.env.TREASURY_ACCOUNT_ID!;
 const TREASURY_PRIVATE_KEY = process.env.TREASURY_PRIVATE_KEY!;

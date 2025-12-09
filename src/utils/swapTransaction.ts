@@ -1,8 +1,7 @@
-import { TransferTransaction, AccountId, TokenId } from '@hiero-ledger/sdk';
+import { TransferTransaction, AccountId, TokenId } from '@hashgraph/sdk';
 import { getDAppConnector } from './walletConnect';
 
 const OLD_TOKEN_ID = import.meta.env.VITE_OLD_TOKEN_ID;
-const NEW_TOKEN_ID = import.meta.env.VITE_NEW_TOKEN_ID;
 const BLACKHOLE_ACCOUNT_ID = import.meta.env.VITE_BLACKHOLE_ACCOUNT_ID;
 
 export interface SwapResult {

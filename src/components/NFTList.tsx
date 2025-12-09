@@ -15,28 +15,28 @@ export const NFTList = ({ accountId }: NFTListProps) => {
   const [swapping, setSwapping] = useState<Set<number>>(new Set());
   const [massSwapping, setMassSwapping] = useState(false);
 
+  const loadNFTs = async () => {
+    if (!accountId) {
+      setNfts([]);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const fetchedNFTs = await fetchAccountNFTs(accountId);
+      console.log('Fetched NFTs:', fetchedNFTs);
+      setNfts(fetchedNFTs);
+    } catch (err) {
+      console.error('Failed to load NFTs:', err);
+      setError('Failed to load your NFTs. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const loadNFTs = async () => {
-      if (!accountId) {
-        setNfts([]);
-        return;
-      }
-
-      setLoading(true);
-      setError(null);
-
-      try {
-        const fetchedNFTs = await fetchAccountNFTs(accountId);
-        console.log('Fetched NFTs:', fetchedNFTs);
-        setNfts(fetchedNFTs);
-      } catch (err) {
-        console.error('Failed to load NFTs:', err);
-        setError('Failed to load your NFTs. Please try again.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
     loadNFTs();
   }, [accountId]);
 
