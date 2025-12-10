@@ -12,6 +12,15 @@ export interface SwapResult {
   serialNumber?: number;
 }
 
+export interface BatchSwapResult {
+  success: boolean;
+  transactionId?: string;
+  error?: string;
+  serialNumbers: number[];
+  successfulSerials?: number[];
+  failedSerials?: number[];
+}
+
 /**
  * Check if an account is associated with a token by querying the mirror node
  */
@@ -165,8 +174,118 @@ export const swapSingleNFT = async (
 };
 
 /**
+ * Swap a batch of NFTs in a SINGLE transaction
+ * User signs ONCE to transfer multiple NFTs (up to 10) to blackhole
+ */
+export const swapBatchNFTs = async (
+  userAccountId: string,
+  serialNumbers: number[]
+): Promise<BatchSwapResult> => {
+  try {
+    console.log(`Starting batch swap for ${serialNumbers.length} NFTs in single transaction`);
+
+    const dAppConnector = getDAppConnector();
+    if (!dAppConnector) {
+      throw new Error('Wallet not connected');
+    }
+
+    // Get the signer for the user's account
+    const signer = dAppConnector.getSigner(AccountId.fromString(userAccountId));
+    if (!signer) {
+      throw new Error('No signer available');
+    }
+
+    // Check token association (only need to check once for the batch)
+    console.log('Checking token association for new token...');
+    const isAssociated = await isTokenAssociated(userAccountId, NEW_TOKEN_ID);
+
+    if (!isAssociated) {
+      throw new Error('TOKEN_NOT_ASSOCIATED');
+    }
+
+    console.log('User already associated with new token ✓');
+    console.log('Creating batched transfer transaction...');
+
+    // Create a SINGLE transaction with MULTIPLE NFT transfers
+    let transaction = new TransferTransaction();
+
+    // Add all NFT transfers to the same transaction
+    for (const serialNumber of serialNumbers) {
+      transaction = transaction.addNftTransfer(
+        TokenId.fromString(OLD_TOKEN_ID),
+        serialNumber,
+        AccountId.fromString(userAccountId),
+        AccountId.fromString(BLACKHOLE_ACCOUNT_ID)
+      );
+    }
+
+    // Set memo with all serial numbers
+    transaction = transaction.setTransactionMemo(
+      `Batch swap: ${serialNumbers.join(', ')}`
+    );
+
+    console.log('Batched transaction created, requesting signature from wallet...');
+
+    // Execute transaction through the signer (wallet will sign ONCE for all NFTs)
+    const txResponse = await transaction.executeWithSigner(signer);
+
+    console.log('Transaction submitted, waiting for receipt...');
+
+    // Get the receipt
+    const receipt = await txResponse.getReceiptWithSigner(signer);
+
+    console.log('Transaction receipt:', receipt.status.toString());
+
+    if (receipt.status.toString() !== 'SUCCESS') {
+      throw new Error(`Transaction failed with status: ${receipt.status.toString()}`);
+    }
+
+    const transactionId = txResponse.transactionId.toString();
+    console.log('Batch of old NFTs transferred successfully:', transactionId);
+
+    // Now call backend to send all new NFTs in one batch
+    console.log('Calling backend to send batch of new NFTs...');
+
+    const response = await fetch('/api/swap', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        oldNftTransactionId: transactionId,
+        userAccountId,
+        serialNumbers, // Send array of serial numbers
+        isBatch: true,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Backend batch swap failed');
+    }
+
+    const result = await response.json();
+    console.log('Batch swap completed successfully:', result);
+
+    return {
+      success: true,
+      transactionId: result.transactionId,
+      serialNumbers,
+      successfulSerials: serialNumbers,
+    };
+  } catch (error) {
+    console.error('Batch swap failed:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      serialNumbers,
+      failedSerials: serialNumbers,
+    };
+  }
+};
+
+/**
  * Swap multiple NFTs in batches with progress callback
  * Hedera limit: ~10 NFT transfers per transaction to avoid throttling
+ * NOW USES TRUE BATCHING: 1 signature per 10 NFTs instead of 10 signatures
  */
 export const swapMultipleNFTs = async (
   userAccountId: string,
@@ -186,31 +305,45 @@ export const swapMultipleNFTs = async (
 
   console.log(`Processing ${batches.length} batches of up to ${BATCH_SIZE} NFTs each`);
 
-  // Process each batch
+  // Process each batch as a SINGLE transaction
   for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
     const batch = batches[batchIndex];
     console.log(`Processing batch ${batchIndex + 1}/${batches.length} with ${batch.length} NFTs`);
 
-    // Process NFTs in current batch sequentially
-    for (const serialNumber of batch) {
-      const result = await swapSingleNFT(userAccountId, serialNumber);
-      results.push(result);
+    // Swap entire batch in ONE transaction
+    const batchResult = await swapBatchNFTs(userAccountId, batch);
 
-      // Call progress callback
-      if (onProgress) {
-        onProgress(results.length, serialNumbers.length, serialNumber);
+    // Convert batch result to individual results for compatibility
+    if (batchResult.success) {
+      for (const serialNumber of batch) {
+        results.push({
+          success: true,
+          transactionId: batchResult.transactionId,
+          serialNumber,
+        });
+
+        // Call progress callback
+        if (onProgress) {
+          onProgress(results.length, serialNumbers.length, serialNumber);
+        }
       }
+    } else {
+      // If batch failed, mark all as failed
+      for (const serialNumber of batch) {
+        results.push({
+          success: false,
+          error: batchResult.error,
+          serialNumber,
+        });
 
-      // If one fails, continue with others but log it
-      if (!result.success) {
-        console.error(`Failed to swap NFT #${serialNumber}:`, result.error);
+        // Call progress callback
+        if (onProgress) {
+          onProgress(results.length, serialNumbers.length, serialNumber);
+        }
       }
-
-      // Small delay between individual swaps within batch
-      await new Promise(resolve => setTimeout(resolve, 500));
     }
 
-    // Longer delay between batches to avoid overwhelming the network
+    // Delay between batches to avoid overwhelming the network
     if (batchIndex < batches.length - 1) {
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
