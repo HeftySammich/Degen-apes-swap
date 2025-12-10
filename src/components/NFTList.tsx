@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import { fetchAccountNFTs } from '../utils/nftQuery';
-import type { NFTWithImage } from '../utils/nftQuery';
+import type { NFTWithImage, NFTPage } from '../utils/nftQuery';
 import { swapSingleNFT, swapMultipleNFTs, associateToken } from '../utils/swapTransaction';
 import { getDAppConnector } from '../utils/walletConnect';
 import { AccountId } from '@hashgraph/sdk';
 import { Modal } from './Modal';
+import { ProgressModal } from './ProgressModal';
 import './NFTList.css';
 
 const NEW_TOKEN_ID = import.meta.env.VITE_NEW_TOKEN_ID;
@@ -20,6 +21,12 @@ export const NFTList = ({ accountId }: NFTListProps) => {
   const [swapping, setSwapping] = useState<Set<number>>(new Set());
   const [massSwapping, setMassSwapping] = useState(false);
 
+  // Pagination states
+  const [pageSize, setPageSize] = useState(25);
+  const [hasMore, setHasMore] = useState(false);
+  const [nextLink, setNextLink] = useState<string | undefined>(undefined);
+  const [loadingMore, setLoadingMore] = useState(false);
+
   // Modal states
   const [showAssociationModal, setShowAssociationModal] = useState(false);
   const [showSwapConfirmModal, setShowSwapConfirmModal] = useState(false);
@@ -30,30 +37,53 @@ export const NFTList = ({ accountId }: NFTListProps) => {
   const [showResultModal, setShowResultModal] = useState(false);
   const [resultMessage, setResultMessage] = useState<{ title: string; message: string; isSuccess: boolean } | null>(null);
 
-  const loadNFTs = async () => {
+  // Progress modal states
+  const [showProgressModal, setShowProgressModal] = useState(false);
+  const [swapProgress, setSwapProgress] = useState({ current: 0, total: 0, currentNFT: 0 });
+
+  const loadNFTs = async (reset: boolean = true) => {
     if (!accountId) {
       setNfts([]);
       return;
     }
 
-    setLoading(true);
+    if (reset) {
+      setLoading(true);
+      setNfts([]);
+      setNextLink(undefined);
+    } else {
+      setLoadingMore(true);
+    }
     setError(null);
 
     try {
-      const fetchedNFTs = await fetchAccountNFTs(accountId);
-      console.log('Fetched NFTs:', fetchedNFTs);
-      setNfts(fetchedNFTs);
+      const result: NFTPage = await fetchAccountNFTs(
+        accountId,
+        pageSize,
+        reset ? undefined : nextLink
+      );
+      console.log('Fetched NFTs:', result);
+
+      if (reset) {
+        setNfts(result.nfts);
+      } else {
+        setNfts(prev => [...prev, ...result.nfts]);
+      }
+
+      setHasMore(result.hasMore);
+      setNextLink(result.nextLink);
     } catch (err) {
       console.error('Failed to load NFTs:', err);
       setError('Failed to load your NFTs. Please try again.');
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   };
 
   useEffect(() => {
-    loadNFTs();
-  }, [accountId]);
+    loadNFTs(true);
+  }, [accountId, pageSize]);
 
   const handleSwapSingle = async (serialNumber: number) => {
     if (!accountId) return;
@@ -78,7 +108,7 @@ export const NFTList = ({ accountId }: NFTListProps) => {
           isSuccess: true
         });
         setShowResultModal(true);
-        await loadNFTs();
+        await loadNFTs(true);
       } else {
         setResultMessage({
           title: '❌ Swap Failed',
@@ -168,13 +198,28 @@ export const NFTList = ({ accountId }: NFTListProps) => {
     if (!accountId || nfts.length === 0) return;
 
     setMassSwapping(true);
+    setShowProgressModal(true);
+    setSwapProgress({ current: 0, total: nfts.length, currentNFT: 0 });
 
     try {
       const serialNumbers = nfts.map(nft => nft.serial_number);
-      const results = await swapMultipleNFTs(accountId, serialNumbers);
+
+      // Progress callback
+      const onProgress = (completed: number, total: number, currentSerial?: number) => {
+        setSwapProgress({
+          current: completed,
+          total: total,
+          currentNFT: currentSerial || 0
+        });
+      };
+
+      const results = await swapMultipleNFTs(accountId, serialNumbers, onProgress);
 
       const successful = results.filter(r => r.success).length;
       const failed = results.filter(r => !r.success).length;
+
+      // Hide progress modal
+      setShowProgressModal(false);
 
       if (failed === 0) {
         setResultMessage({
@@ -191,9 +236,12 @@ export const NFTList = ({ accountId }: NFTListProps) => {
       }
       setShowResultModal(true);
 
-      await loadNFTs();
+      await loadNFTs(true);
     } catch (error) {
       console.error('Mass swap error:', error);
+
+      // Hide progress modal
+      setShowProgressModal(false);
 
       // Check if it's a token association error
       if (error instanceof Error && error.message === 'TOKEN_NOT_ASSOCIATED') {
@@ -248,7 +296,23 @@ export const NFTList = ({ accountId }: NFTListProps) => {
 
   return (
     <div className="nft-list">
-      <h2>Your Eligible NFTs ({nfts.length})</h2>
+      <div className="nft-list-header">
+        <h2>Your Eligible NFTs ({nfts.length})</h2>
+        <div className="page-size-selector">
+          <label htmlFor="pageSize">NFTs per page:</label>
+          <select
+            id="pageSize"
+            value={pageSize}
+            onChange={(e) => setPageSize(Number(e.target.value))}
+            disabled={loading || loadingMore}
+          >
+            <option value={5}>5</option>
+            <option value={25}>25</option>
+            <option value={50}>50</option>
+            <option value={100}>100</option>
+          </select>
+        </div>
+      </div>
       <div className="nft-feed">
         {nfts.map((nft) => (
           <div key={`${nft.token_id}-${nft.serial_number}`} className="nft-swap-card">
@@ -294,6 +358,21 @@ export const NFTList = ({ accountId }: NFTListProps) => {
           </div>
         ))}
       </div>
+
+      {/* Load More Button */}
+      {hasMore && (
+        <div className="load-more-section">
+          <button
+            className="load-more-button"
+            onClick={() => loadNFTs(false)}
+            disabled={loadingMore}
+          >
+            {loadingMore ? 'Loading...' : 'Load More NFTs'}
+          </button>
+        </div>
+      )}
+
+      {/* Mass Swap Button */}
       {nfts.length > 1 && (
         <div className="mass-swap-section">
           <button
@@ -402,6 +481,14 @@ export const NFTList = ({ accountId }: NFTListProps) => {
       >
         <p style={{ whiteSpace: 'pre-line' }}>{resultMessage?.message}</p>
       </Modal>
+
+      {/* Progress Modal */}
+      <ProgressModal
+        isOpen={showProgressModal}
+        current={swapProgress.current}
+        total={swapProgress.total}
+        currentNFT={swapProgress.currentNFT}
+      />
     </div>
   );
 };

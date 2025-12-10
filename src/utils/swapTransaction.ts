@@ -165,29 +165,58 @@ export const swapSingleNFT = async (
 };
 
 /**
- * Swap multiple NFTs in sequence
+ * Swap multiple NFTs in batches with progress callback
+ * Hedera limit: ~10 NFT transfers per transaction to avoid throttling
  */
 export const swapMultipleNFTs = async (
   userAccountId: string,
-  serialNumbers: number[]
+  serialNumbers: number[],
+  onProgress?: (completed: number, total: number, currentSerial?: number) => void
 ): Promise<SwapResult[]> => {
-  console.log(`Starting mass swap for ${serialNumbers.length} NFTs`);
-  
+  console.log(`Starting batch swap for ${serialNumbers.length} NFTs`);
+
+  const BATCH_SIZE = 10; // Hedera's safe limit per transaction
   const results: SwapResult[] = [];
-  
-  for (const serialNumber of serialNumbers) {
-    const result = await swapSingleNFT(userAccountId, serialNumber);
-    results.push(result);
-    
-    // If one fails, continue with others but log it
-    if (!result.success) {
-      console.error(`Failed to swap NFT #${serialNumber}:`, result.error);
-    }
-    
-    // Small delay between swaps to avoid overwhelming the network
-    await new Promise(resolve => setTimeout(resolve, 1000));
+  const batches: number[][] = [];
+
+  // Split into batches of 10
+  for (let i = 0; i < serialNumbers.length; i += BATCH_SIZE) {
+    batches.push(serialNumbers.slice(i, i + BATCH_SIZE));
   }
-  
+
+  console.log(`Processing ${batches.length} batches of up to ${BATCH_SIZE} NFTs each`);
+
+  // Process each batch
+  for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+    const batch = batches[batchIndex];
+    console.log(`Processing batch ${batchIndex + 1}/${batches.length} with ${batch.length} NFTs`);
+
+    // Process NFTs in current batch sequentially
+    for (const serialNumber of batch) {
+      const result = await swapSingleNFT(userAccountId, serialNumber);
+      results.push(result);
+
+      // Call progress callback
+      if (onProgress) {
+        onProgress(results.length, serialNumbers.length, serialNumber);
+      }
+
+      // If one fails, continue with others but log it
+      if (!result.success) {
+        console.error(`Failed to swap NFT #${serialNumber}:`, result.error);
+      }
+
+      // Small delay between individual swaps within batch
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
+    // Longer delay between batches to avoid overwhelming the network
+    if (batchIndex < batches.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+  }
+
+  console.log(`Batch swap complete: ${results.filter(r => r.success).length}/${serialNumbers.length} successful`);
   return results;
 };
 

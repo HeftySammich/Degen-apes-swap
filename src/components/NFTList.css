@@ -5,11 +5,51 @@
   padding: 2rem;
 }
 
+.nft-list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
 .nft-list h2 {
   color: #FFD700;
-  margin-bottom: 2rem;
-  text-align: center;
+  margin: 0;
   font-size: 2rem;
+}
+
+.page-size-selector {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.page-size-selector label {
+  color: #FFD700;
+  font-size: 0.9rem;
+}
+
+.page-size-selector select {
+  background: #1a1a1a;
+  color: #FFD700;
+  border: 2px solid #FFD700;
+  border-radius: 8px;
+  padding: 0.5rem 1rem;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.page-size-selector select:hover:not(:disabled) {
+  background: rgba(255, 215, 0, 0.1);
+  border-color: #FFA500;
+}
+
+.page-size-selector select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .nft-list-empty,
@@ -172,6 +212,36 @@
 .mass-swap-button:hover {
   transform: scale(1.05);
   box-shadow: 0 8px 20px rgba(255, 215, 0, 0.5);
+}
+
+/* Load More Section */
+.load-more-section {
+  text-align: center;
+  margin: 2rem 0;
+}
+
+.load-more-button {
+  padding: 1rem 2.5rem;
+  background: rgba(255, 215, 0, 0.1);
+  color: #FFD700;
+  border: 2px solid #FFD700;
+  border-radius: 12px;
+  font-size: 1.1rem;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.load-more-button:hover:not(:disabled) {
+  background: rgba(255, 215, 0, 0.2);
+  border-color: #FFA500;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(255, 215, 0, 0.3);
+}
+
+.load-more-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .mass-swap-button:active {

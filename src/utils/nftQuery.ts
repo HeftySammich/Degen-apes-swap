@@ -1,5 +1,6 @@
-// Query NFTs from Hedera Mirror Node
-const MIRROR_NODE_URL = 'https://mainnet-public.mirrornode.hedera.com';
+// Query NFTs from Hedera Mirror Node with pagination support
+import { fetchNFTsWithPagination } from './mirrorNodeService';
+
 const OLD_TOKEN_ID = import.meta.env.VITE_OLD_TOKEN_ID;
 
 export type NFT = {
@@ -14,19 +15,22 @@ export type NFTWithImage = NFT & {
   name?: string;
 };
 
-// Fetch NFTs owned by an account for a specific token
-export const fetchAccountNFTs = async (accountId: string): Promise<NFTWithImage[]> => {
+export type NFTPage = {
+  nfts: NFTWithImage[];
+  hasMore: boolean;
+  nextLink?: string;
+};
+
+// Fetch NFTs owned by an account for a specific token with pagination
+export const fetchAccountNFTs = async (
+  accountId: string,
+  limit: number = 25,
+  nextLink?: string
+): Promise<NFTPage> => {
   try {
-    const url = `${MIRROR_NODE_URL}/api/v1/accounts/${accountId}/nfts?token.id=${OLD_TOKEN_ID}`;
-    console.log('Fetching NFTs from:', url);
+    console.log(`Fetching NFTs (limit: ${limit}, nextLink: ${nextLink ? 'yes' : 'no'})`);
 
-    const response = await fetch(url);
-
-    if (!response.ok) {
-      throw new Error(`Mirror node request failed: ${response.status}`);
-    }
-
-    const data = await response.json();
+    const data = await fetchNFTsWithPagination(accountId, OLD_TOKEN_ID, limit, nextLink);
     console.log('NFT data received:', data);
 
     // Process NFTs to extract image URLs from metadata
@@ -97,7 +101,11 @@ export const fetchAccountNFTs = async (accountId: string): Promise<NFTWithImage[
       };
     }));
 
-    return nftsWithImages;
+    return {
+      nfts: nftsWithImages,
+      hasMore: !!data.links.next,
+      nextLink: data.links.next,
+    };
   } catch (error) {
     console.error('Error fetching NFTs:', error);
     throw error;
