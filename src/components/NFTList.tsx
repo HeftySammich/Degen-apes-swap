@@ -1,8 +1,13 @@
 import { useState, useEffect } from 'react';
 import { fetchAccountNFTs } from '../utils/nftQuery';
 import type { NFTWithImage } from '../utils/nftQuery';
-import { swapSingleNFT, swapMultipleNFTs } from '../utils/swapTransaction';
+import { swapSingleNFT, swapMultipleNFTs, associateToken } from '../utils/swapTransaction';
+import { getDAppConnector } from '../utils/walletConnect';
+import { AccountId } from '@hashgraph/sdk';
+import { Modal } from './Modal';
 import './NFTList.css';
+
+const NEW_TOKEN_ID = import.meta.env.VITE_NEW_TOKEN_ID;
 
 interface NFTListProps {
   accountId: string | null;
@@ -14,6 +19,12 @@ export const NFTList = ({ accountId }: NFTListProps) => {
   const [error, setError] = useState<string | null>(null);
   const [swapping, setSwapping] = useState<Set<number>>(new Set());
   const [massSwapping, setMassSwapping] = useState(false);
+
+  // Modal states
+  const [showAssociationModal, setShowAssociationModal] = useState(false);
+  const [showSwapConfirmModal, setShowSwapConfirmModal] = useState(false);
+  const [pendingSwapSerial, setPendingSwapSerial] = useState<number | null>(null);
+  const [pendingMassSwap, setPendingMassSwap] = useState(false);
 
   const loadNFTs = async () => {
     if (!accountId) {
@@ -43,17 +54,13 @@ export const NFTList = ({ accountId }: NFTListProps) => {
   const handleSwapSingle = async (serialNumber: number) => {
     if (!accountId) return;
 
-    // Show confirmation dialog explaining the process
-    const confirmed = confirm(
-      `🔄 NFT Swap Process:\n\n` +
-      `Step 1: You will send your old Degen Ape #${serialNumber} to the burn address\n` +
-      `Step 2: You will automatically receive the new Degen Ape #${serialNumber} with royalties\n\n` +
-      `⚠️ Your wallet will show "You receive: nothing" - this is normal!\n` +
-      `The new NFT will be sent to you immediately after.\n\n` +
-      `Continue with swap?`
-    );
+    // Store the serial number and show confirmation modal
+    setPendingSwapSerial(serialNumber);
+    setShowSwapConfirmModal(true);
+  };
 
-    if (!confirmed) return;
+  const executeSwap = async (serialNumber: number) => {
+    if (!accountId) return;
 
     setSwapping(prev => new Set(prev).add(serialNumber));
 
@@ -62,13 +69,24 @@ export const NFTList = ({ accountId }: NFTListProps) => {
 
       if (result.success) {
         alert(`✅ Successfully swapped NFT #${serialNumber}!\nTransaction ID: ${result.transactionId}`);
-        // Reload NFTs to show updated list
         await loadNFTs();
       } else {
         alert(`❌ Swap failed for NFT #${serialNumber}\n${result.error}`);
       }
     } catch (error) {
       console.error('Swap error:', error);
+
+      // Check if it's a token association error
+      if (error instanceof Error && error.message === 'TOKEN_NOT_ASSOCIATED') {
+        setShowAssociationModal(true);
+        setSwapping(prev => {
+          const next = new Set(prev);
+          next.delete(serialNumber);
+          return next;
+        });
+        return;
+      }
+
       alert(`❌ Swap failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setSwapping(prev => {
@@ -79,11 +97,46 @@ export const NFTList = ({ accountId }: NFTListProps) => {
     }
   };
 
+  const handleAssociateToken = async () => {
+    if (!accountId) return;
+
+    setShowAssociationModal(false);
+
+    try {
+      const dAppConnector = getDAppConnector();
+      if (!dAppConnector) {
+        throw new Error('Wallet not connected');
+      }
+
+      const signer = dAppConnector.getSigner(AccountId.fromString(accountId));
+      if (!signer) {
+        throw new Error('No signer available');
+      }
+
+      // Associate the token
+      await associateToken(accountId, NEW_TOKEN_ID, signer);
+
+      alert('✅ Token association successful! You can now proceed with the swap.');
+
+      // Retry the swap if there was a pending one
+      if (pendingSwapSerial !== null) {
+        await executeSwap(pendingSwapSerial);
+      }
+    } catch (error) {
+      console.error('Association error:', error);
+      alert(`❌ Token association failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
   const handleSwapAll = async () => {
     if (!accountId || nfts.length === 0) return;
 
-    const confirmed = confirm(`Are you sure you want to swap all ${nfts.length} NFTs?`);
-    if (!confirmed) return;
+    setPendingMassSwap(true);
+    setShowSwapConfirmModal(true);
+  };
+
+  const executeMassSwap = async () => {
+    if (!accountId || nfts.length === 0) return;
 
     setMassSwapping(true);
 
@@ -100,10 +153,17 @@ export const NFTList = ({ accountId }: NFTListProps) => {
         alert(`⚠️ Swapped ${successful} NFTs successfully.\n${failed} failed.`);
       }
 
-      // Reload NFTs to show updated list
       await loadNFTs();
     } catch (error) {
       console.error('Mass swap error:', error);
+
+      // Check if it's a token association error
+      if (error instanceof Error && error.message === 'TOKEN_NOT_ASSOCIATED') {
+        setShowAssociationModal(true);
+        setMassSwapping(false);
+        return;
+      }
+
       alert(`❌ Mass swap failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setMassSwapping(false);
@@ -202,7 +262,85 @@ export const NFTList = ({ accountId }: NFTListProps) => {
           </button>
         </div>
       )}
+
+      {/* Token Association Modal */}
+      <Modal
+        isOpen={showAssociationModal}
+        onClose={() => setShowAssociationModal(false)}
+        onConfirm={handleAssociateToken}
+        title="⚠️ Token Association Required"
+        confirmText="Associate Token"
+        cancelText="Cancel"
+      >
+        <p>
+          Before you can receive the new Degen Ape NFT, you need to associate your account with the new token.
+        </p>
+        <p>
+          <strong>This is a one-time fee of approximately $0.05 (paid in HBAR).</strong>
+        </p>
+        <p>
+          After association, you'll be able to receive and swap your NFTs.
+        </p>
+      </Modal>
+
+      {/* Swap Confirmation Modal */}
+      <Modal
+        isOpen={showSwapConfirmModal}
+        onClose={() => {
+          setShowSwapConfirmModal(false);
+          setPendingSwapSerial(null);
+          setPendingMassSwap(false);
+        }}
+        onConfirm={() => {
+          setShowSwapConfirmModal(false);
+          if (pendingMassSwap) {
+            setPendingMassSwap(false);
+            executeMassSwap();
+          } else if (pendingSwapSerial !== null) {
+            const serial = pendingSwapSerial;
+            setPendingSwapSerial(null);
+            executeSwap(serial);
+          }
+        }}
+        title="🔄 NFT Swap Process"
+        confirmText="Continue"
+        cancelText="Cancel"
+      >
+        {pendingMassSwap ? (
+          <>
+            <p>
+              <strong>You are about to swap {nfts.length} NFTs.</strong>
+            </p>
+            <p>
+              <strong>Step 1:</strong> You will send your old Degen Ape NFTs to the burn address
+            </p>
+            <p>
+              <strong>Step 2:</strong> You will automatically receive the new Degen Ape NFTs with royalties
+            </p>
+            <p>
+              ⚠️ <strong>Your wallet will show "You receive: nothing" - this is normal!</strong>
+            </p>
+            <p>
+              The new NFTs will be sent to you immediately after.
+            </p>
+          </>
+        ) : (
+          <>
+            <p>
+              <strong>Step 1:</strong> You will send your old Degen Ape #{pendingSwapSerial} to the burn address
+            </p>
+            <p>
+              <strong>Step 2:</strong> You will automatically receive the new Degen Ape #{pendingSwapSerial} with royalties
+            </p>
+            <p>
+              ⚠️ <strong>Your wallet will show "You receive: nothing" - this is normal!</strong>
+            </p>
+            <p>
+              The new NFT will be sent to you immediately after.
+            </p>
+          </>
+        )}
+      </Modal>
     </div>
   );
 };
-

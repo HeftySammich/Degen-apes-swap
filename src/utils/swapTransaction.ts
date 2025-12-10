@@ -38,7 +38,7 @@ async function isTokenAssociated(accountId: string, tokenId: string): Promise<bo
  * Associate an account with a token
  * User pays the association fee (~$0.05)
  */
-async function associateToken(
+export async function associateToken(
   userAccountId: string,
   tokenId: string,
   signer: any
@@ -61,13 +61,14 @@ async function associateToken(
 
 /**
  * Swap a single NFT
- * Step 0: Check if user is associated with new token, if not, associate
+ * Step 0: Check if user is associated with new token, if not, throw error to trigger modal
  * Step 1: User signs and executes transaction to send old NFT to blackhole
  * Step 2: Backend verifies receipt and sends new NFT to user
  */
 export const swapSingleNFT = async (
   userAccountId: string,
-  serialNumber: number
+  serialNumber: number,
+  skipAssociationCheck: boolean = false
 ): Promise<SwapResult> => {
   try {
     console.log(`Starting swap for NFT #${serialNumber}`);
@@ -83,28 +84,16 @@ export const swapSingleNFT = async (
       throw new Error('No signer available');
     }
 
-    // Step 0: Check if user is associated with the new token
-    console.log('Checking token association for new token...');
-    const isAssociated = await isTokenAssociated(userAccountId, NEW_TOKEN_ID);
+    // Step 0: Check if user is associated with the new token (unless skipping)
+    if (!skipAssociationCheck) {
+      console.log('Checking token association for new token...');
+      const isAssociated = await isTokenAssociated(userAccountId, NEW_TOKEN_ID);
 
-    if (!isAssociated) {
-      console.log('User not associated with new token. Requesting association...');
-
-      // Ask user to confirm association
-      const confirmAssociation = confirm(
-        `⚠️ Token Association Required\n\n` +
-        `Before you can receive the new Degen Ape NFT, you need to associate your account with the new token.\n\n` +
-        `This is a one-time fee of approximately $0.05 (paid in HBAR).\n\n` +
-        `Continue with token association?`
-      );
-
-      if (!confirmAssociation) {
-        throw new Error('Token association cancelled by user');
+      if (!isAssociated) {
+        // Throw special error to trigger association modal
+        throw new Error('TOKEN_NOT_ASSOCIATED');
       }
 
-      // Associate the token
-      await associateToken(userAccountId, NEW_TOKEN_ID, signer);
-    } else {
       console.log('User already associated with new token ✓');
     }
 
