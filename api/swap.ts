@@ -76,14 +76,57 @@ export default async function handler(
     // Verify the NFT(s) were actually transferred to blackhole
     // (Additional verification could be done here by querying mirror node)
 
-    // Now send new NFT(s) from treasury to user
-    console.log(`Sending ${serials.length} new NFT(s) to user...`);
+    // Check which serials treasury actually owns before attempting transfer
+    console.log(`Checking treasury ownership for ${serials.length} NFT(s)...`);
+    const availableSerials: number[] = [];
+    const missingSerials: number[] = [];
+
+    for (const serial of serials) {
+      try {
+        // Query mirror node to check if treasury owns this serial
+        const response = await fetch(
+          `https://mainnet-public.mirrornode.hedera.com/api/v1/tokens/${NEW_TOKEN_ID}/nfts?account.id=${TREASURY_ACCOUNT_ID}&serialnumber=${serial}`
+        );
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data.nfts && data.nfts.length > 0) {
+            availableSerials.push(serial);
+          } else {
+            console.warn(`Treasury does not own serial #${serial} - likely already swapped`);
+            missingSerials.push(serial);
+          }
+        } else {
+          console.warn(`Failed to check ownership for serial #${serial}`);
+          missingSerials.push(serial);
+        }
+      } catch (error) {
+        console.error(`Error checking serial #${serial}:`, error);
+        missingSerials.push(serial);
+      }
+    }
+
+    console.log(`Available serials: ${availableSerials.length}/${serials.length}`);
+    if (missingSerials.length > 0) {
+      console.log(`Missing serials (already swapped): ${missingSerials.join(', ')}`);
+    }
+
+    // If no serials are available, return error
+    if (availableSerials.length === 0) {
+      return res.status(400).json({
+        error: 'All requested NFTs have already been swapped',
+        missingSerials,
+      });
+    }
+
+    // Now send new NFT(s) from treasury to user (only available ones)
+    console.log(`Sending ${availableSerials.length} new NFT(s) to user...`);
 
     // Create transaction with all NFT transfers
     let newNftTransaction = new TransferTransaction();
 
-    // Add all NFT transfers to the same transaction
-    for (const serial of serials) {
+    // Add all NFT transfers to the same transaction (only available serials)
+    for (const serial of availableSerials) {
       newNftTransaction = newNftTransaction.addNftTransfer(
         TokenId.fromString(NEW_TOKEN_ID),
         serial, // Same serial number
@@ -94,8 +137,8 @@ export default async function handler(
 
     // Set memo
     const memo = isMultiple
-      ? `Batch swap completed: ${serials.join(', ')}`
-      : `Swap completed for Degen Ape #${serials[0]}`;
+      ? `Batch swap completed: ${availableSerials.join(', ')}`
+      : `Swap completed for Degen Ape #${availableSerials[0]}`;
 
     newNftTransaction = newNftTransaction.setTransactionMemo(memo);
 
@@ -110,15 +153,21 @@ export default async function handler(
     const newNftTransactionId = newNftTxResponse.transactionId.toString();
     console.log('New NFT(s) transferred successfully:', newNftTransactionId);
 
+    // Build response with partial success info if some were missing
+    const responseMessage = missingSerials.length > 0
+      ? `Successfully swapped ${availableSerials.length} NFTs (${missingSerials.length} already swapped)`
+      : isMultiple
+        ? `Successfully swapped ${availableSerials.length} NFTs`
+        : `Successfully swapped NFT #${availableSerials[0]}`;
+
     return res.status(200).json({
       success: true,
       transactionId: newNftTransactionId,
       oldNftTransactionId,
-      serialNumber: serials[0], // For backwards compatibility
-      serialNumbers: serials,
-      message: isMultiple
-        ? `Successfully swapped ${serials.length} NFTs`
-        : `Successfully swapped NFT #${serials[0]}`,
+      serialNumber: availableSerials[0], // For backwards compatibility
+      serialNumbers: availableSerials,
+      missingSerials: missingSerials.length > 0 ? missingSerials : undefined,
+      message: responseMessage,
     });
 
   } catch (error) {
