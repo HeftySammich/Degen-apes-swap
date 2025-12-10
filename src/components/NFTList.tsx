@@ -26,6 +26,10 @@ export const NFTList = ({ accountId }: NFTListProps) => {
   const [pendingSwapSerial, setPendingSwapSerial] = useState<number | null>(null);
   const [pendingMassSwap, setPendingMassSwap] = useState(false);
 
+  // Success/Error modal states
+  const [showResultModal, setShowResultModal] = useState(false);
+  const [resultMessage, setResultMessage] = useState<{ title: string; message: string; isSuccess: boolean } | null>(null);
+
   const loadNFTs = async () => {
     if (!accountId) {
       setNfts([]);
@@ -68,10 +72,20 @@ export const NFTList = ({ accountId }: NFTListProps) => {
       const result = await swapSingleNFT(accountId, serialNumber);
 
       if (result.success) {
-        alert(`✅ Successfully swapped NFT #${serialNumber}!\nTransaction ID: ${result.transactionId}`);
+        setResultMessage({
+          title: '✅ Swap Successful!',
+          message: `Successfully swapped NFT #${serialNumber}!\n\nTransaction ID: ${result.transactionId}`,
+          isSuccess: true
+        });
+        setShowResultModal(true);
         await loadNFTs();
       } else {
-        alert(`❌ Swap failed for NFT #${serialNumber}\n${result.error}`);
+        setResultMessage({
+          title: '❌ Swap Failed',
+          message: `Swap failed for NFT #${serialNumber}\n\n${result.error}`,
+          isSuccess: false
+        });
+        setShowResultModal(true);
       }
     } catch (error) {
       console.error('Swap error:', error);
@@ -87,7 +101,12 @@ export const NFTList = ({ accountId }: NFTListProps) => {
         return;
       }
 
-      alert(`❌ Swap failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setResultMessage({
+        title: '❌ Swap Failed',
+        message: `Swap failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        isSuccess: false
+      });
+      setShowResultModal(true);
     } finally {
       setSwapping(prev => {
         const next = new Set(prev);
@@ -116,7 +135,12 @@ export const NFTList = ({ accountId }: NFTListProps) => {
       // Associate the token
       await associateToken(accountId, NEW_TOKEN_ID, signer);
 
-      alert('✅ Token association successful! You can now proceed with the swap.');
+      setResultMessage({
+        title: '✅ Token Association Successful!',
+        message: 'You can now proceed with the swap.',
+        isSuccess: true
+      });
+      setShowResultModal(true);
 
       // Retry the swap if there was a pending one
       if (pendingSwapSerial !== null) {
@@ -124,7 +148,12 @@ export const NFTList = ({ accountId }: NFTListProps) => {
       }
     } catch (error) {
       console.error('Association error:', error);
-      alert(`❌ Token association failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setResultMessage({
+        title: '❌ Token Association Failed',
+        message: `Token association failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        isSuccess: false
+      });
+      setShowResultModal(true);
     }
   };
 
@@ -148,10 +177,19 @@ export const NFTList = ({ accountId }: NFTListProps) => {
       const failed = results.filter(r => !r.success).length;
 
       if (failed === 0) {
-        alert(`✅ Successfully swapped all ${successful} NFTs!`);
+        setResultMessage({
+          title: '✅ Mass Swap Successful!',
+          message: `Successfully swapped all ${successful} NFTs!`,
+          isSuccess: true
+        });
       } else {
-        alert(`⚠️ Swapped ${successful} NFTs successfully.\n${failed} failed.`);
+        setResultMessage({
+          title: '⚠️ Mass Swap Partially Complete',
+          message: `Swapped ${successful} NFTs successfully.\n${failed} failed.`,
+          isSuccess: false
+        });
       }
+      setShowResultModal(true);
 
       await loadNFTs();
     } catch (error) {
@@ -164,7 +202,12 @@ export const NFTList = ({ accountId }: NFTListProps) => {
         return;
       }
 
-      alert(`❌ Mass swap failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setResultMessage({
+        title: '❌ Mass Swap Failed',
+        message: `Mass swap failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        isSuccess: false
+      });
+      setShowResultModal(true);
     } finally {
       setMassSwapping(false);
     }
@@ -340,6 +383,24 @@ export const NFTList = ({ accountId }: NFTListProps) => {
             </p>
           </>
         )}
+      </Modal>
+
+      {/* Success/Error Result Modal */}
+      <Modal
+        isOpen={showResultModal}
+        onClose={() => {
+          setShowResultModal(false);
+          setResultMessage(null);
+        }}
+        onConfirm={() => {
+          setShowResultModal(false);
+          setResultMessage(null);
+        }}
+        title={resultMessage?.title || ''}
+        confirmText="OK"
+        showCancel={false}
+      >
+        <p style={{ whiteSpace: 'pre-line' }}>{resultMessage?.message}</p>
       </Modal>
     </div>
   );

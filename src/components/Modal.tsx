@@ -9,6 +9,7 @@ interface ModalProps {
   children: React.ReactNode;
   confirmText?: string;
   cancelText?: string;
+  showCancel?: boolean;
 }
 
 export const Modal: React.FC<ModalProps> = ({
@@ -18,7 +19,8 @@ export const Modal: React.FC<ModalProps> = ({
   title,
   children,
   confirmText = 'Continue',
-  cancelText = 'Cancel'
+  cancelText = 'Cancel',
+  showCancel = true
 }) => {
   if (!isOpen) return null;
 
@@ -33,9 +35,11 @@ export const Modal: React.FC<ModalProps> = ({
           {children}
         </div>
         <div className="modal-footer">
-          <button className="modal-button modal-button-cancel" onClick={onClose}>
-            {cancelText}
-          </button>
+          {showCancel && (
+            <button className="modal-button modal-button-cancel" onClick={onClose}>
+              {cancelText}
+            </button>
+          )}
           <button className="modal-button modal-button-confirm" onClick={onConfirm}>
             {confirmText}
           </button>
