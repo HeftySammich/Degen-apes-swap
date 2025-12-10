@@ -97,10 +97,9 @@ export default async function handler(
       ? `Batch swap completed: ${serials.join(', ')}`
       : `Swap completed for Degen Ape #${serials[0]}`;
 
-    newNftTransaction = newNftTransaction
-      .setTransactionMemo(memo)
-      .freezeWith(client);
+    newNftTransaction = newNftTransaction.setTransactionMemo(memo);
 
+    // Execute transaction (client operator will auto-sign)
     const newNftTxResponse = await newNftTransaction.execute(client);
     const newNftReceipt = await newNftTxResponse.getReceipt(client);
 
